@@ -53,7 +53,6 @@ var DeviceManager = {
   }
 }
 
-var runEver
 
 async function main(){
   //setup camera
@@ -70,8 +69,11 @@ async function main(){
   var draw = ()=>{
     var frame = session.readFrame()
     var data = frame.data;
+    
     for (var i = 0, j = 0; j < data.length; i++, j += 4) {
-        data[j + 2] = 255
+        data[j + 0] = data[j + 1]
+        data[j + 1] = data[j + 1]
+        data[j + 2] = data[j + 1]
     }
 
     context.putImageData(frame, 0, 0);
