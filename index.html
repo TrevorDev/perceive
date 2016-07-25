@@ -7,11 +7,6 @@
     <!-- <link rel="stylesheet" type="text/css" href="../../public/css/main.css"> -->
   </head>
   <body>
-    <!-- <video autoplay="true" id="videoElement" style="width: 500px;height: 375px;background-color: #666;">
-
-    </video> -->
-    <canvas id="canvas">
-  </canvas>
   </body>
   <script id="shader-vs" type="x-shader/x-vertex">
     attribute vec2 a_imageResolutionPosition;
@@ -32,7 +27,6 @@
      v_texCoord = a_texCoord;
     }
   </script>
-
   <script id="shader-fs" type="x-shader/x-fragment">
       precision mediump float;
       // our texture

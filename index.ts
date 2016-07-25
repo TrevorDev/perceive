@@ -53,6 +53,8 @@ var DeviceManager = {
   }
 }
 
+
+
 var WebGLHelper = {
   loadShader: (gl, type, shaderString)=>{
     var ret = gl.createShader(type)
@@ -71,8 +73,6 @@ var WebGLHelper = {
     if (!gl.getProgramParameter(ret, gl.LINK_STATUS)) {
       throw ("Unable to initialize the shader program: " + gl.getProgramInfoLog(ret))
     }
-
-    gl.useProgram(ret)
     return ret
   },
   setRectangle: (gl, x, y, width, height) => {
@@ -87,43 +87,8 @@ var WebGLHelper = {
        x1, y2,
        x2, y1,
        x2, y2]), gl.STATIC_DRAW)
-  }
-}
-
-async function main(){
-  //setup camera
-  var selectedCamera = (await DeviceManager.findAllVideoDevices())[0]
-  var session = await CaptureSession.create(selectedCamera)
-
-  //create canvas
-  var canvas:any = document.getElementById('canvas')
-  canvas.width = session.videoElement.videoWidth
-  canvas.height = session.videoElement.videoHeight
-  var gl = canvas.getContext("webgl")
-
-  //load shaders
-  var vertShader = WebGLHelper.loadShader(gl, gl.VERTEX_SHADER, document.getElementById("shader-vs").textContent)
-  var fragShader = WebGLHelper.loadShader(gl, gl.FRAGMENT_SHADER, document.getElementById("shader-fs").textContent)
-  var program = WebGLHelper.createProgram(gl, vertShader, fragShader)
-
-  // look up where the vertex data needs to go.
-  var positionLocation = gl.getAttribLocation(program, "a_imageResolutionPosition")
-  var texCoordLocation = gl.getAttribLocation(program, "a_texCoord")
-
-  // provide texture coordinates for the rectangle.
-  var texCoordBuffer = gl.createBuffer()
-  gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer)
-  WebGLHelper.setRectangle(gl,0,0,1,1)
-  gl.enableVertexAttribArray(texCoordLocation)
-  gl.vertexAttribPointer(texCoordLocation, 2, gl.FLOAT, false, 0, 0)
-  var u_image0Location = gl.getUniformLocation(program, "u_image")
-  gl.uniform1i(u_image0Location, 0)  // texture unit 0
-
-  //render to screen
-  var draw = ()=>{
-    var frame = session.readFrame()
-    var data = frame.data
-
+  },
+  createTexture: (gl, frame) => {
     var texture = gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, texture)
     // Set the parameters so we can render any size image.
@@ -132,29 +97,114 @@ async function main(){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     // Upload the image into the texture.
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
+    if(frame){
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
+    }else{
+      //pull texture from current canvas
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, gl.canvas);
+    }
 
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, texture)
+    return texture;
+  }
+}
+
+class GPUImage {
+  private device:any
+  texture:any
+
+  constructor(device:GPUDevice, texture){
+    this.device = device
+    this.texture = texture
+  }
+}
+
+
+
+class GPUDevice {
+  canvas:any
+  private gl:any
+  private renderProgram:any
+
+  constructor(){
+    this.canvas = document.createElement('canvas');
+
+    //this.setRenderSize(500,500)
+    this.gl = this.canvas.getContext("webgl")
+    // SETUP RENDER PROGRAM
+      var vertShader = WebGLHelper.loadShader(this.gl, this.gl.VERTEX_SHADER, document.getElementById("shader-vs").textContent)
+      var fragShader = WebGLHelper.loadShader(this.gl, this.gl.FRAGMENT_SHADER, document.getElementById("shader-fs").textContent)
+      this.renderProgram = WebGLHelper.createProgram(this.gl, vertShader, fragShader)
+      this.gl.useProgram(this.renderProgram)
+      // provide texture coordinates for the rectangle.
+      var texCoordBuffer = this.gl.createBuffer()
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, texCoordBuffer)
+      WebGLHelper.setRectangle(this.gl,0,0,1,1)
+
+      var texCoordLocation = this.gl.getAttribLocation(this.renderProgram, "a_texCoord")
+      this.gl.enableVertexAttribArray(texCoordLocation)
+      this.gl.vertexAttribPointer(texCoordLocation, 2, this.gl.FLOAT, false, 0, 0)
+
+      var u_image0Location = this.gl.getUniformLocation(this.renderProgram, "u_image")
+      this.gl.uniform1i(u_image0Location, 0)  // texture unit 0
+  }
+
+  createImage(frame){
+    var texture = WebGLHelper.createTexture(this.gl, frame)
+    var ret = new GPUImage(this, texture)
+    return ret
+  }
+
+  setRenderSize(width, height){
+    this.gl.canvas.width = width
+    this.gl.canvas.height = height
+    this.gl.viewport(0, 0, this.gl.drawingBufferWidth, this.gl.drawingBufferHeight);
+  }
+
+  render(image:GPUImage){
+
+
+    this.gl.activeTexture(this.gl.TEXTURE0)
+    this.gl.bindTexture(this.gl.TEXTURE_2D, image.texture)
 
 
     // lookup uniforms
-    var resolutionLocation = gl.getUniformLocation(program, "u_canvasResolution")
+    var resolutionLocation = this.gl.getUniformLocation(this.renderProgram, "u_canvasResolution")
 
     // set the resolution
-    gl.uniform2f(resolutionLocation, canvas.width, canvas.height)
+    this.gl.uniform2f(resolutionLocation, this.canvas.width, this.canvas.height)
+
     // Create a buffer for the position of the rectangle corners.
-    var buffer = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    gl.enableVertexAttribArray(positionLocation)
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0)
+    var buffer = this.gl.createBuffer()
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer)
 
-    // Stretch so that image fits canvas
-    WebGLHelper.setRectangle(gl, 0, 0, canvas.width, canvas.height)
+    var positionLocation = this.gl.getAttribLocation(this.renderProgram, "a_imageResolutionPosition")
+    this.gl.enableVertexAttribArray(positionLocation)
+    this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0)
 
-    gl.drawArrays(gl.TRIANGLES, 0, 6)
+    // Stretch so that image fits this.canvas
+    WebGLHelper.setRectangle(this.gl, 0, 0, this.canvas.width, this.canvas.height)
+
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, 6)
+  }
+}
 
 
+
+async function main(){
+  //setup camera
+  var selectedCamera = (await DeviceManager.findAllVideoDevices())[0]
+  var session = await CaptureSession.create(selectedCamera)
+
+  //create gpu device
+  var gpuDevice = new GPUDevice()
+  gpuDevice.setRenderSize(session.videoElement.videoWidth, session.videoElement.videoHeight)
+  document.body.appendChild(gpuDevice.canvas);
+
+  //render to screen
+  var draw = ()=>{
+    var frame = session.readFrame()
+    var image = gpuDevice.createImage(frame)
+    gpuDevice.render(image)
     requestAnimationFrame(draw)
   }
   draw()
